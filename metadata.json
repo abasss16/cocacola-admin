@@ -1,0 +1,6 @@
+{
+  "name": "Coca-Cola Catalog Admin",
+  "description": "E-commerce catalog administration panel for Coca-Cola products with full CRUD capabilities powered by Supabase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
