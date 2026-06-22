@@ -1,9 +1,9 @@
-import { LayoutDashboard, ShoppingBag, LogOut, Menu, X, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, ShoppingBag, ClipboardList, LogOut, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface SidebarProps {
-  activeTab: 'dashboard' | 'products';
-  setActiveTab: (tab: 'dashboard' | 'products') => void;
+  activeTab: 'dashboard' | 'products' | 'orders';
+  setActiveTab: (tab: 'dashboard' | 'products' | 'orders') => void;
   onLogout: () => void;
   isOpen: boolean;
   setIsOpen: (isOpen: boolean) => void;
@@ -21,6 +21,7 @@ export default function Sidebar({
   const menuItems = [
     { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
     { id: 'products' as const, label: 'Products', icon: ShoppingBag },
+    { id: 'orders' as const, label: 'Orders', icon: ClipboardList },
   ];
 
   return (
@@ -68,7 +69,7 @@ export default function Sidebar({
           {/* Logo element */}
           <div className="flex items-center gap-3 mb-10">
             <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-[#E60028] shadow-xs">
-              <span className="font-serif font-black text-sm tracking-wider italic">coke</span>
+              <span className="font-serif font-black text-sm tracking-wider italic">Coke</span>
             </div>
             <div>
               <span className="font-sans font-extrabold text-gray-900 tracking-tight block text-lg">

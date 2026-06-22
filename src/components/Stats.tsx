@@ -1,12 +1,13 @@
-import { Package, Folder, Boxes } from 'lucide-react';
+import { Package, Folder, Boxes, ClipboardList } from 'lucide-react';
 import { Product } from '../types';
 
 interface StatsProps {
   products: Product[];
+  totalOrders: number;
   isLoading: boolean;
 }
 
-export default function Stats({ products, isLoading }: StatsProps) {
+export default function Stats({ products, totalOrders, isLoading }: StatsProps) {
   // Compute metrics Safely based on actual product data fetched
   const totalProducts = products.length;
   const totalStock = products.reduce((acc, curr) => acc + (Number(curr.stock) || 0), 0);
@@ -40,12 +41,21 @@ export default function Stats({ products, isLoading }: StatsProps) {
       icon: Folder,
       iconBg: 'bg-gray-50 text-gray-500',
     },
+    {
+      id: 'total-orders',
+      title: 'Total Orders',
+      value: totalOrders,
+      trend: 'Placed',
+      trendStyle: 'text-indigo-500 font-bold',
+      icon: ClipboardList,
+      iconBg: 'bg-indigo-50 text-indigo-600',
+    },
   ];
 
   if (isLoading) {
     return (
-      <div id="stats-loading-skeleton" className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[1, 2, 3].map((i) => (
+      <div id="stats-loading-skeleton" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[1, 2, 3, 4].map((i) => (
           <div
             key={i}
             className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm flex items-center justify-between"
@@ -63,7 +73,7 @@ export default function Stats({ products, isLoading }: StatsProps) {
   }
 
   return (
-    <div id="stats-summary-row" className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div id="stats-summary-row" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
       {cards.map((card) => {
         const Icon = card.icon;
         return (
@@ -78,7 +88,7 @@ export default function Stats({ products, isLoading }: StatsProps) {
               </p>
               <h3 className="text-3xl font-light text-slate-900 tracking-tight">
                 {card.value}{' '}
-                <span className={`text-xs ml-2 ${card.trendStyle}`}>
+                <span className={`text-xs ml-1 ${card.trendStyle}`}>
                   {card.trend}
                 </span>
               </h3>

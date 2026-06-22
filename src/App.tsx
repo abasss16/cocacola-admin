@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
-import { Product, ToastMessage, ToastType } from './types';
+import { Product, Order, OrderStatus, ToastMessage, ToastType } from './types';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import Stats from './components/Stats';
@@ -22,6 +22,10 @@ import {
   TrendingUp,
   Package,
   HelpCircle,
+  ClipboardList,
+  Phone,
+  User,
+  ShoppingCart
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -40,6 +44,8 @@ import {
 
 // Default static mockup items in case Supabase table doesn't exist yet (Self-healing mode)
 const LOCAL_STORAGE_PRODUCTS_KEY = 'coca_cola_fallback_products';
+const LOCAL_STORAGE_ORDERS_KEY = 'coca_cola_fallback_orders';
+
 const INITIAL_DEMO_PRODUCTS: Product[] = [
   {
     id: 'demo-1',
@@ -83,13 +89,46 @@ const INITIAL_DEMO_PRODUCTS: Product[] = [
   }
 ];
 
+const INITIAL_DEMO_ORDERS: Order[] = [
+  {
+    id: 'ord-1',
+    created_at: new Date(Date.now() - 3600000 * 3).toISOString(), // 3 hours ago
+    customer_name: 'Adam Bayu Saputra',
+    customer_phone: '081234567890',
+    product_id: 'demo-1',
+    quantity: 2,
+    total_price: 13000,
+    status: 'Pending',
+  },
+  {
+    id: 'ord-2',
+    created_at: new Date(Date.now() - 3600000 * 24).toISOString(), // 1 day ago
+    customer_name: 'Budi Santoso',
+    customer_phone: '082345678901',
+    product_id: 'demo-2',
+    quantity: 1,
+    total_price: 8500,
+    status: 'Processing',
+  },
+  {
+    id: 'ord-3',
+    created_at: new Date(Date.now() - 3600000 * 48).toISOString(), // 2 days ago
+    customer_name: 'Dewi Lestari',
+    customer_phone: '083456789012',
+    product_id: 'demo-3',
+    quantity: 1,
+    total_price: 11000,
+    status: 'Completed',
+  }
+];
+
 export default function App() {
   // Auth state
   const [user, setUser] = useState<any>(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
 
   // App layouts
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders'>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Database Products state
@@ -99,9 +138,18 @@ export default function App() {
   const [showSqlSchemaPrompt, setShowSqlSchemaPrompt] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
 
+  // Database Orders state
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoadingOrders, setIsLoadingOrders] = useState(false);
+  const [useOrdersLocalFallback, setUseOrdersLocalFallback] = useState(false);
+
   // CRUD UI variables
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
+
+  // Orders UI variables
+  const [orderSearchQuery, setOrderSearchQuery] = useState('');
+  const [selectedOrderStatus, setSelectedOrderStatus] = useState<string>('All');
   
   // Modals state
   const [formOpen, setFormOpen] = useState(false);
@@ -150,12 +198,13 @@ export default function App() {
     };
   }, []);
 
-  // Fetch product items based on live database status
+  // Fetch product items and orders based on live database status
   useEffect(() => {
     if (user) {
       fetchProducts();
+      fetchOrders();
     }
-  }, [user, useLocalFallback]);
+  }, [user, useLocalFallback, useOrdersLocalFallback]);
 
   const fetchProducts = async () => {
     setIsLoadingProducts(true);
@@ -199,6 +248,109 @@ export default function App() {
     } finally {
       setIsLoadingProducts(false);
     }
+  };
+
+  const fetchOrders = async () => {
+    setIsLoadingOrders(true);
+    
+    if (useLocalFallback || useOrdersLocalFallback) {
+      const localOrdersData = localStorage.getItem(LOCAL_STORAGE_ORDERS_KEY);
+      if (localOrdersData) {
+        setOrders(JSON.parse(localOrdersData));
+      } else {
+        localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(INITIAL_DEMO_ORDERS));
+        setOrders(INITIAL_DEMO_ORDERS);
+      }
+      setIsLoadingOrders(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        if (error.code === '42P01') {
+          console.warn('The orders table does not exist yet. Launching Sandbox Fallback mode for orders.');
+          setUseOrdersLocalFallback(true);
+          setShowSqlSchemaPrompt(true);
+        } else {
+          throw error;
+        }
+      } else if (data) {
+        setOrders(data as Order[]);
+      }
+    } catch (err: any) {
+      console.error('Error querying orders:', err);
+      setUseOrdersLocalFallback(true);
+      const localOrdersData = localStorage.getItem(LOCAL_STORAGE_ORDERS_KEY);
+      if (localOrdersData) {
+        setOrders(JSON.parse(localOrdersData));
+      } else {
+        localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(INITIAL_DEMO_ORDERS));
+        setOrders(INITIAL_DEMO_ORDERS);
+      }
+    } finally {
+      setIsLoadingOrders(false);
+    }
+  };
+
+  const handleOrderStatusUpdate = async (orderId: string, nextStatus: OrderStatus) => {
+    try {
+      if (useLocalFallback || useOrdersLocalFallback) {
+        const updated = orders.map((o) =>
+          o.id === orderId ? { ...o, status: nextStatus } : o
+        );
+        setOrders(updated);
+        localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(updated));
+        addToast(`Order status updated to "${nextStatus}" in local sandbox.`, 'success');
+        return;
+      }
+
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: nextStatus })
+        .eq('id', orderId);
+
+      if (error) throw error;
+
+      addToast(`Order status successfully updated to "${nextStatus}"!`, 'success');
+      fetchOrders();
+    } catch (err: any) {
+      console.error('Error updating order status:', err);
+      addToast(err.message || 'Failed to update order status.', 'error');
+    }
+  };
+
+  const handleSimulateOrder = () => {
+    if (products.length === 0) {
+      addToast('Please register at least one product before simulating an order.', 'error');
+      return;
+    }
+    const randomProduct = products[Math.floor(Math.random() * products.length)];
+    const quantity = Math.floor(Math.random() * 3) + 1;
+    const price = randomProduct.price * quantity;
+    const names = ['Ahmad Syarif', 'Rudi Wijaya', 'Siti Rahma', 'Bambang Kusuma', 'Lina Marlina'];
+    const randomName = names[Math.floor(Math.random() * names.length)];
+    const randomPhone = '08' + Math.floor(100000000 + Math.random() * 900000000);
+    
+    const newOrder: Order = {
+      id: `ord-${Math.random().toString(36).substring(2, 9)}`,
+      created_at: new Date().toISOString(),
+      customer_name: randomName,
+      customer_phone: randomPhone,
+      product_id: randomProduct.id,
+      quantity,
+      total_price: price,
+      status: 'Pending',
+    };
+
+    const updated = [newOrder, ...orders];
+    setOrders(updated);
+    localStorage.setItem(LOCAL_STORAGE_ORDERS_KEY, JSON.stringify(updated));
+    addToast(`Successfully Simulated Order for "${randomName}"!`, 'success');
   };
 
   const syncLocalToStorage = (updatedProducts: Product[]) => {
@@ -361,9 +513,38 @@ export default function App() {
     return matchesSearch && matchesCategory;
   });
 
-  const sqlSchemaText = `-- Connect to your Supabase project (https://supabase.com)
--- Go to SQL Editor, paste the following script, and click "Run" to establish your table:
+  // Combine orders with products for display
+  const enrichedOrders = orders.map((order) => {
+    const product = products.find((p) => p.id === order.product_id);
+    return {
+      ...order,
+      product,
+    };
+  });
 
+  // Filter orders based on searching and status tabs
+  const filteredOrders = enrichedOrders.filter((ord) => {
+    const searchString = orderSearchQuery.toLowerCase();
+    const productName = (ord.product?.name || '').toLowerCase();
+    const customerName = ord.customer_name.toLowerCase();
+    const phone = ord.customer_phone || '';
+    const id = ord.id.toLowerCase();
+
+    const matchesSearch = 
+      customerName.includes(searchString) ||
+      phone.includes(searchString) ||
+      productName.includes(searchString) ||
+      id.includes(searchString);
+    
+    const matchesStatus = selectedOrderStatus === 'All' || ord.status === selectedOrderStatus;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  const sqlSchemaText = `-- Connect to your Supabase project (https://supabase.com)
+-- Go to SQL Editor, paste the following script, and click "Run" to establish your tables:
+
+-- 1. Create PRODUCTS Table
 create table products (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -375,10 +556,27 @@ create table products (
   image_url text
 );
 
--- Enable standard security access policies
+-- Enable RLS for products
 alter table products enable row level security;
 create policy "Allow read-only public access" on products for select using (true);
 create policy "Allow all actions for authenticated administrators" on products for all using (true) with check (true);
+
+-- 2. Create ORDERS Table
+create table orders (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  customer_name text not null,
+  customer_phone text not null,
+  product_id uuid references products(id) on delete set null,
+  quantity integer not null,
+  total_price numeric not null,
+  status text not null default 'Pending'
+);
+
+-- Enable RLS for orders
+alter table orders enable row level security;
+create policy "Allow read-only public access" on orders for select using (true);
+create policy "Allow all actions for authenticated administrators" on orders for all using (true) with check (true);
 `;
 
   const copySqlToClipboard = () => {
@@ -450,12 +648,14 @@ create policy "Allow all actions for authenticated administrators" on products f
         <header className="bg-white border-b border-gray-150 px-6 py-5 flex items-center justify-between sticky top-0 z-30" id="top-toolbar">
           <div className="font-sans">
             <h1 className="text-xl font-extrabold tracking-tight text-gray-900 capitalize">
-              {activeTab === 'dashboard' ? 'Overview Analytics by: Adam Bayu Saputra - 2403040123' : 'Catalog Registry'}
+              {activeTab === 'dashboard' ? 'Overview Analytics by: Adam Bayu S - 2403040123' : activeTab === 'products' ? 'Catalog Registry' : 'Customer Orders'}
             </h1>
             <p className="text-xs text-gray-400 mt-0.5">
               {activeTab === 'dashboard'
                 ? 'Warehouse capacities, category metrics, and live charts'
-                : 'Manage real-time digital stock entries'}
+                : activeTab === 'products'
+                  ? 'Manage real-time digital stock entries'
+                  : 'Track and process client purchases in real-time'}
             </p>
           </div>
 
@@ -464,13 +664,13 @@ create policy "Allow all actions for authenticated administrators" on products f
             <div
               id="db-badge"
               className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${
-                useLocalFallback
+                useLocalFallback || useOrdersLocalFallback
                   ? 'bg-amber-50 text-amber-700 border-amber-100'
                   : 'bg-emerald-50 text-emerald-700 border-emerald-100'
               }`}
             >
               <Database className="w-3.5 h-3.5" />
-              <span>{useLocalFallback ? 'Database Sandbox' : 'Supabase Cloud'}</span>
+              <span>{useLocalFallback || useOrdersLocalFallback ? 'Database Sandbox' : 'Supabase Cloud'}</span>
             </div>
 
             {/* Quick action button */}
@@ -494,7 +694,7 @@ create policy "Allow all actions for authenticated administrators" on products f
         <main className="flex-1 p-6 space-y-8 max-w-7xl w-full mx-auto" id="app-main-content">
           {/* Summary stats row */}
           <section id="metrics-summary-view">
-            <Stats products={products} isLoading={isLoadingProducts} />
+            <Stats products={products} totalOrders={orders.length} isLoading={isLoadingProducts || isLoadingOrders} />
           </section>
 
           {/* TAB 1: OVERVIEW DASHBOARD */}
@@ -919,6 +1119,303 @@ create policy "Allow all actions for authenticated administrators" on products f
                               <Trash2 className="w-3.5 h-3.5" />
                               Remove
                             </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 3: CUSTOMER ORDERS MANAGEMENT */}
+          {activeTab === 'orders' && (
+            <div className="space-y-6" id="orders-tab-view">
+              {/* Controls Toolbar */}
+              <div className="bg-white p-4 rounded-2xl border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-4 font-sans shadow-2xs" id="orders-control-toolbar">
+                <div className="flex-1 relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-gray-400">
+                    <Search className="w-4.5 h-4.5" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Search by customer name, phone number, order ID, product name..."
+                    value={orderSearchQuery}
+                    onChange={(e) => setOrderSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 border border-gray-150 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#E60028]/2% focus:border-[#E60028] placeholder-gray-400 transition-all text-gray-900"
+                    id="order-search-input"
+                  />
+                  {orderSearchQuery && (
+                    <button
+                      onClick={() => setOrderSearchQuery('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                      id="order-search-clear-btn"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3 shrink-0">
+                  {/* Status pills selector */}
+                  <div className="flex bg-gray-50 p-1.5 rounded-xl border border-gray-100/80 gap-1 overflow-x-auto">
+                    {['All', 'Pending', 'Processing', 'Completed'].map((status) => {
+                      const count = status === 'All' 
+                        ? enrichedOrders.length 
+                        : enrichedOrders.filter(o => o.status === status).length;
+                      
+                      const isActive = selectedOrderStatus === status;
+
+                      return (
+                        <button
+                          key={status}
+                          onClick={() => setSelectedOrderStatus(status)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer
+                            ${isActive 
+                              ? 'bg-white text-[#E60028] shadow-xs border border-gray-100' 
+                              : 'text-gray-500 hover:text-gray-900'}`}
+                        >
+                          {status} <span className="text-[10px] opacity-70 font-mono">({count})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Simulate Order (Available on local fallback to allow simple sandboxed verification) */}
+                  {(useLocalFallback || useOrdersLocalFallback) && (
+                    <button
+                      onClick={handleSimulateOrder}
+                      className="px-4 py-2.5 bg-gray-100 hover:bg-[#E60028] text-gray-600 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-gray-200/50"
+                      id="btn-simulate-order"
+                      title="Quick test using fake/fallback customer purchase orders"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Simulate Order
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Data Table */}
+              {isLoadingOrders ? (
+                <div className="bg-white p-12 rounded-2xl border border-gray-100 flex flex-col items-center justify-center space-y-4 font-sans">
+                  <div className="w-10 h-10 border-4 border-t-[#E60028] border-gray-100 rounded-full animate-spin" />
+                  <p className="text-sm font-semibold text-gray-400">Loading purchase orders...</p>
+                </div>
+              ) : filteredOrders.length === 0 ? (
+                <div className="bg-white p-14 rounded-2xl text-center border border-gray-100 font-sans" id="empty-orders-state">
+                  <ClipboardList className="w-12 h-12 text-gray-300 mx-auto stroke-1" />
+                  <h3 className="text-lg font-bold text-gray-900 mt-4">No Orders Listed</h3>
+                  <p className="text-sm text-gray-400 mt-2 max-w-sm mx-auto">
+                    There are no customer orders in this perspective. Try changing the filter tabs or search query.
+                  </p>
+                  {(useLocalFallback || useOrdersLocalFallback) && (
+                    <button
+                      onClick={handleSimulateOrder}
+                      className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 bg-[#E60028] text-sm font-semibold rounded-xl text-white cursor-pointer hover:bg-[#c50022] transition-colors"
+                    >
+                      Simulate Test Purchase Order
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-xs text-gray-400 font-semibold pl-1 font-sans">
+                    Showing {filteredOrders.length} entries of {orders.length} total active purchases
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden lg:block bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-2xs" id="orders-desktop-table">
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[900px] border-collapse text-left font-sans text-sm">
+                        <thead className="bg-gray-50 border-b border-gray-100">
+                          <tr>
+                            <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] w-1.5/12">Order ID</th>
+                            <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] w-3/12">Customer Details</th>
+                            <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] w-3.5/12">Product Profile</th>
+                            <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] w-1/12 text-center">Qty</th>
+                            <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] w-1.5/12 text-right">Total Invoice</th>
+                            <th className="px-6 py-4 font-bold text-slate-500 uppercase tracking-widest text-[10px] w-2/12 text-center">Order Status & Activity</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {filteredOrders.map((ord) => {
+                            const dateParsed = new Date(ord.created_at).toLocaleString('id-ID', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            });
+
+                            return (
+                              <tr key={ord.id} className="hover:bg-gray-50/50 transition-colors" id={`row-order-${ord.id}`}>
+                                <td className="px-6 py-4 align-middle">
+                                  <div className="font-mono text-xs font-semibold text-gray-400 truncate w-20" title={ord.id}>
+                                    #{ord.id.substring(0, 8)}
+                                  </div>
+                                  <span className="text-[10px] text-gray-450 block mt-0.5">{dateParsed}</span>
+                                </td>
+                                <td className="px-6 py-4 align-middle">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5 text-gray-900 font-semibold text-sm">
+                                      <User className="w-3.5 h-3.5 text-gray-400" />
+                                      <span>{ord.customer_name}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-xs text-gray-400 font-mono">
+                                      <Phone className="w-3.5 h-3.5 text-gray-450" />
+                                      <a href={`tel:${ord.customer_phone}`} className="hover:text-[#E60028] hover:underline">
+                                        {ord.customer_phone}
+                                      </a>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4 align-middle">
+                                  <div className="flex items-center gap-2.5">
+                                    {ord.product?.image_url && (
+                                      <div className="w-9 h-9 rounded bg-gray-50 border border-gray-100 flex items-center justify-center p-1 overflow-hidden shrink-0">
+                                        <img
+                                          src={ord.product.image_url}
+                                          alt=""
+                                          className="max-h-full max-w-full object-contain"
+                                          onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            target.src = 'https://images.unsplash.com/photo-1543257580-7269da773bf5?auto=format&fit=crop&q=80&w=200';
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
+                                      <span className="font-semibold text-gray-900 block truncate" title={ord.product?.name || 'Loading Catalog...'}>
+                                        {ord.product?.name || 'Registered Product (Inactive Reference)'}
+                                      </span>
+                                      <span className="text-xs text-gray-400 block -mt-0.5">
+                                        Unit cost: {ord.product ? formatRupiah(ord.product.price) : 'N/A'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-6 py-4 align-middle text-center font-semibold text-gray-700">
+                                  x{ord.quantity}
+                                </td>
+                                <td className="px-6 py-4 align-middle text-right font-mono font-extrabold text-[#E60028]">
+                                  {formatRupiah(ord.total_price)}
+                                </td>
+                                <td className="px-6 py-4 align-middle text-center">
+                                  <div className="flex items-center justify-center">
+                                    <select
+                                      value={ord.status}
+                                      onChange={(e) => handleOrderStatusUpdate(ord.id, e.target.value as OrderStatus)}
+                                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-[#E60028] ${
+                                        ord.status === 'Pending'
+                                          ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100/70'
+                                          : ord.status === 'Processing'
+                                            ? 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100/70'
+                                            : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 border-emerald-300'
+                                      }`}
+                                    >
+                                      <option value="Pending">Pending 🟡</option>
+                                      <option value="Processing">Processing 🔵</option>
+                                      <option value="Completed">Completed 🟢</option>
+                                    </select>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Mobile responsive view */}
+                  <div className="lg:hidden space-y-4" id="orders-mobile-list">
+                    {filteredOrders.map((ord) => {
+                      const dateParsed = new Date(ord.created_at).toLocaleString('id-ID', {
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      });
+
+                      return (
+                        <div
+                          key={ord.id}
+                          className="bg-white p-5 rounded-2xl border border-gray-100 shadow-2xs space-y-4 font-sans"
+                        >
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <div className="font-mono text-xs font-bold text-gray-400">
+                                #{ord.id.substring(0, 8)}
+                              </div>
+                              <span className="text-[10px] text-gray-400 block mt-0.5">{dateParsed}</span>
+                            </div>
+
+                            {/* Status dropdown on mobile inside header */}
+                            <select
+                              value={ord.status}
+                              onChange={(e) => handleOrderStatusUpdate(ord.id, e.target.value as OrderStatus)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer focus:outline-none ${
+                                ord.status === 'Pending'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : ord.status === 'Processing'
+                                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              }`}
+                            >
+                              <option value="Pending">Pending</option>
+                              <option value="Processing">Processing</option>
+                              <option value="Completed">Completed</option>
+                            </select>
+                          </div>
+
+                          <div className="space-y-2 border-t border-b border-gray-50 py-3">
+                            <div className="space-y-1">
+                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Customer</p>
+                              <span className="text-sm font-semibold text-gray-900 block">{ord.customer_name}</span>
+                              <span className="text-xs text-gray-400 font-mono block">{ord.customer_phone}</span>
+                            </div>
+
+                            <div className="space-y-1 pt-1">
+                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Product</p>
+                              <span className="text-xs font-semibold text-gray-900 block truncate">
+                                {ord.product?.name || 'Registered Product (No Catalog)'}
+                              </span>
+                              <span className="text-xs text-gray-400 font-mono block">
+                                {ord.quantity} x {ord.product ? formatRupiah(ord.product.price) : 'N/A'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Total Invoice</p>
+                              <p className="font-extrabold text-[#E60028] text-base mt-0.5">
+                                {formatRupiah(ord.total_price)}
+                              </p>
+                            </div>
+
+                            {/* Interactive direct state transition clickers for ultimate efficiency */}
+                            <div className="flex items-center gap-1.5">
+                              {ord.status !== 'Processing' && ord.status !== 'Completed' && (
+                                <button
+                                  onClick={() => handleOrderStatusUpdate(ord.id, 'Processing')}
+                                  className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold border border-blue-150 transition-colors cursor-pointer mr-1"
+                                >
+                                  Process ⚡
+                                </button>
+                              )}
+                              {ord.status !== 'Completed' && (
+                                <button
+                                  onClick={() => handleOrderStatusUpdate(ord.id, 'Completed')}
+                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold border border-emerald-150 transition-colors cursor-pointer"
+                                >
+                                  Complete ✅
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
