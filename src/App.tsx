@@ -504,41 +504,46 @@ export default function App() {
   };
 
   // Filter products list based on search and category metrics
-  const categoriesList = ['All', ...Array.from(new Set(products.map((p) => p.category))).filter(Boolean)];
+  const categoriesList = ['All', ...Array.from(new Set(products.map((p: any) => p.category))).filter(Boolean)];
   
-  const filteredProducts = products.filter((p) => {
+  const filteredProducts = products.filter((p: any) => {
     const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (p.description || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
-  // Combine orders with products for display
-  const enrichedOrders = orders.map((order) => {
-    const product = products.find((p) => p.id === order.product_id);
+// Combine orders with products for display (Safe Mapping)
+  const enrichedOrders = orders.map((order: any) => {
+    // Cari data produk secara manual dari list products berdasarkan product_id angka
+    const matchedProduct = products.find((p: any) => Number(p.id) === Number(order.product_id));
+    
     return {
       ...order,
-      product,
+      // Kita pastikan objek 'product' ini terisi agar baris 528 (ord.product?.name) tidak bernilai null
+      product: matchedProduct || order.products || order.product || { name: 'Produk Tidak Diketahui' },
     };
   });
 
-  // Filter orders based on searching and status tabs
-  const filteredOrders = enrichedOrders.filter((ord) => {
+// Filter orders based on searching and status tabs
+  const filteredOrders = enrichedOrders.filter((ord: any) => {
     const searchString = orderSearchQuery.toLowerCase();
+    
+    // Gunakan guard '?' jika ord.product bernilai null agar tidak crash
     const productName = (ord.product?.name || '').toLowerCase();
-    const customerName = ord.customer_name.toLowerCase();
-    const phone = ord.customer_phone || '';
-    const id = ord.id.toLowerCase();
+    const customerName = (ord.customer_name || '').toLowerCase();
+    const phone = (ord.customer_phone || '').toLowerCase();
+    
+    // FIX: Ubah id angka menjadi string terlebih dahulu sebelum di-toLowerCase()
+    const id = String(ord.id).toLowerCase();
 
-    const matchesSearch = 
+    const matchesSearch =
       customerName.includes(searchString) ||
       phone.includes(searchString) ||
       productName.includes(searchString) ||
       id.includes(searchString);
-    
-    const matchesStatus = selectedOrderStatus === 'All' || ord.status === selectedOrderStatus;
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch;
   });
 
   const sqlSchemaText = `-- Connect to your Supabase project (https://supabase.com)
@@ -1253,7 +1258,7 @@ create policy "Allow all actions for authenticated administrators" on orders for
                               <tr key={ord.id} className="hover:bg-gray-50/50 transition-colors" id={`row-order-${ord.id}`}>
                                 <td className="px-6 py-4 align-middle">
                                   <div className="font-mono text-xs font-semibold text-gray-400 truncate w-20" title={ord.id}>
-                                    #{ord.id.substring(0, 8)}
+                                    #{ord.id}
                                   </div>
                                   <span className="text-[10px] text-gray-450 block mt-0.5">{dateParsed}</span>
                                 </td>
@@ -1348,7 +1353,7 @@ create policy "Allow all actions for authenticated administrators" on orders for
                           <div className="flex justify-between items-start">
                             <div>
                               <div className="font-mono text-xs font-bold text-gray-400">
-                                #{ord.id.substring(0, 8)}
+                                #{ord.id}
                               </div>
                               <span className="text-[10px] text-gray-400 block mt-0.5">{dateParsed}</span>
                             </div>
